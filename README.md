@@ -38,3 +38,65 @@ Which means…I’m done for this part! I got this signal set: (See reference pa
 
 
 And I can tell there’s a spO2 signal (PPG) and a ECG signal in the noise. The temperature also reads, though respiration and heart rate can’t read, which is obviously because of the high noise content in the ECG it would try to calculate from…plus possibly other bugs, but since that’s not a sensor issue, and the code was unchanged for that part, I’ll assume the source code for that was robust, and move on to the next stage; setting this up for wifi!
+
+
+Hello and welcome back to Karl Fiddles Around!
+Last time we worked on setting up the full collection of actual sensors that would be used for the baby boot. We included an ECG, a PPG, and a Thermistor with code to read accurate temperature, heart rate, respiration rate, and electrical heart pulse. With those, we found a signal filtering problem, that would probably be aggravated by the wifi, so instead of solving the partial problem before hooking it up and coming up against it a second time, we decided to get the full picture by integrating the working code with the Websocket Server to Client to Serial code prepared earlier, to see what the complete sequence of circuits would do to the noise coming from the ground into the ECG. 
+
+Here we go!
+
+For this one, I have created both codes in house, so first step is to open both of them, see if they both still compile, and then start the merge!
+
+The codes I’m merging will be:
+BabyBoot_rev3.ino
+ESP_to_ESP_Socket_Server
+ESP_to_ESP_Socket_Client
+
+Because Highcharts was conclusively too slow to handle a streaming websocket, I’ll first get rid of the website section of the server side, and merge the BabyBoot sensors with the server, set to print to serial just to check for any conflicts. 
+
+Merging the Server and the BabyBoot multisensor worked, the signals still came through Serial from the server side. Now that the server is flashed, I can work on the Client side . 
+
+And, with that, I’ve successfully merged the client side, and checked the signal. 
+Although I’m still not getting respiration or heart rates, and the thermistor seems to have burned out (go figure), I have a clear heartbeat and ECG signal. I’m alive!
+
+That said, there does seem to be some stability issues, where the stream lags about half the time, which doesn’t yield a consistent waveform the whole time. There’s also placement problems, where the oximeter will occasionally spike…and I just can’t tell if it’s reading because the size of the chart in the Arduino Serial Plotter doesn’t render the small variations well when the values between signals are extreme. 
+
+So, despite not figuring out the electrode backfeed problem (which we can kick down the road to the actual boot, being that it’s a hardware problem and will be heavily dependent on the final placement and layers of each sensor), we have a working stream!
+
+Now, just for kicks and grins, it would be good to get the thermistor to work, so I’ll check on the reason for its failure and see if switching out will work. 
+
+Doubling back to the original thermistor code without the other peripherals, the thermistor is actually working, so it is probably also suffering from a backflush from the ground corrupting the comparison. This means I have two sources agreeing on the root problem; a diagnosis!
+
+I need to see what is happening with the ground voltage, and see if I can find a way to ensure it’s at a steady 0V…or at least a steady V in general. I do have some microfarad capacitors that should smooth it out…let’s see if hooking those in a couple places in the setup will help smooth out the ground. 
+
+Adding in a microfarad capacitor across the thermistor did nothing to fix the voltage drop error, so I tried checking if there was a variable conflict in the code. I rewrote “T” for temperature as “TC”, but that didn’t change the output either. It definitely is a voltage drop error, which means I’ll need either a digital thermometer or a stronger voltage regulator. 
+
+And, after a bit more research, I’ve found out that the current, not the voltage, is the most important factor for a calibrated Thermistor, so seeing that I’ve been using a set of calculations for calibrated T that doesn’t take into account the new system with altered current values, I’m going to stick with printing the raw sensor values for now, and only calibrate after I’ve finished assembling the whole circuit. 
+
+This also means that I’ll need to calibrate the thermistor for every revision of the circuit from here on out…except that that doesn’t fix the problem. Now that I’m printing the raw voltage reading, I can see that the actual value is 0, meaning there’s no response from the thermistor at all. So, last try before I switch to a digital thermometer again, I’m plugging the thermistor into a completely different power source. 
+
+After that didn’t work, I tried checking whether the thermistor could be swapped for the KY-028 Thermometer module from Elegoo, and since it’s based on the same thermistor probe with the circuitry included, it’s got the same problem. Also, in the middle of checking these things, I discovered that the battery (9v) has already burned down far enough that the circuit couldn’t run anymore. I swapped the battery, and am going to start keeping track of burn time for each battery, and I’m considering adding in some power restriction benchmarks for the system. 
+
+I do have the DS18B20 that was running a digital read error when merged with the other codes before, so I think it’s time to go back to that. The DS might be able to run on lower power, and give a consistent temperature without being influenced by electrical artifacts in the circuit. 
+
+The DS does have a nonblocking option, so we’ll try to merge that with the server side and see what happens. The DS nonblocking works! Ok, now it’s time to try to add in the other two sensors. It wouldn’t be a multisensor suite without all the sensors, right?
+
+So. here’s the full set I’m attempting:
+
+PPG
+ECG
+Temperature
+CO2
+pH
+Glucose (eventually)
+
+I have standins for the CO2 and pH that I can use. The SGP30 air quality sensor includes a raw ambient CO2 reading. Though it’s not recording venous CO2, it’s close enough to work, and we could check whether ambient CO2 is sensitive enough to be usable. 
+
+I also have an aqueous, analog pH sensor that I’d calibrated earlier, so it can be used again here. Aqueous means it needs a buffer, and venous pH is the most responsive, but we don’t want to stick a needle in the baby, so we’ll at least be able to see if surface pH can do the trick if the sensor is working. 
+
+First up is the CO2 sensor. Since it also works on the QWIIC connect system, I was able to daisychain its wiring with the ECG/PPG sensor. Including the Wire.h could be a problem, but let’s see how it loads. 
+
+And it works! Sorta. There’s definitely a growing lag issue, and the battery life is worrisome already. Looking at the compilation, the server is using 60% of program space, and the client is using 64% 
+
+So, this concludes this session of Karl Fiddles Around, because after all, we’re looking at storing and post-processing the data, so as long as it comes in, it doesn't matter how clean because an ML system is reading it. So, we’re all done! Next up, adding an SD card storage system to the client side. See you there. 
+
